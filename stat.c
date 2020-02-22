@@ -2,8 +2,8 @@
 #include "util.h"
 
 #include <linux/ip.h>
+#include <linux/tcp.h>
 #include <netinet/in.h>
-#include <netinet/tcp.h>
 
 
 int is_ip_pkt(unsigned char* data, unsigned data_len)
@@ -19,22 +19,6 @@ int is_tcp_pkt(unsigned char* data, unsigned data_len)
 
 	struct iphdr* ip_hdr = (struct iphdr*)(data+14);
 	return (ip_hdr->protocol == 6);
-
-	// uint16_t sport, dport;
-	// memcpy(&sport, data+14+4*ip_hdr->ihl, 2);
-	// memcpy(&dport, data+14+4*ip_hdr->ihl+2, 2);
-
-	// struct in_addr addr1, addr2;
- //    memcpy(&addr1, &(ip_hdr->saddr), 4);
- //    memcpy(&addr2, &(ip_hdr->daddr), 4);
-
-	// printf("\n");
-	// printf("src ip: %s, ", inet_ntoa(addr1));
-	// printf("src port: %hu, ", ntohs(sport));
-	// printf("dst ip: %s, ", inet_ntoa(addr2));
-	// printf("dst port: %hu, ", ntohs(dport));
-	// printf("pkt len = %u, ", eth_len);
-	// printf("rss hash = %u", cur_buf->hash.rss);
 }
 
 int is_udp_pkt(unsigned char* data, unsigned data_len)
@@ -102,7 +86,6 @@ void ip_stat(struct statistic* stat, unsigned char* data, unsigned data_len)
 
 tuple4_key_t find_tuple4;
 struct unique_tcp_tuple find_tcp_tuple;
-struct tcp_conn find_tcp_conn;
 
 void tcp_stat(struct statistic* stat, unsigned char* data, unsigned data_len)
 {
@@ -112,16 +95,13 @@ void tcp_stat(struct statistic* stat, unsigned char* data, unsigned data_len)
 	stat->tcp_pkt_amount += data_len;
 
 	struct iphdr* ip_hdr = (struct iphdr*)(data+14);
-	uint16_t sport, dport;
-	memcpy(&sport, data+14+4*ip_hdr->ihl, 2);
-	memcpy(&dport, data+14+4*ip_hdr->ihl+2, 2);
+	struct tcphdr* tcp_hdr = (struct tcphdr*)(data+14+4*ip_hdr->ihl);
 
 	find_tuple4.saddr = ip_hdr->saddr;
 	find_tuple4.daddr = ip_hdr->daddr;
-	find_tuple4.sport = sport;
-	find_tuple4.dport = dport;
+	find_tuple4.sport = tcp_hdr->source;
+	find_tuple4.dport = tcp_hdr->dest;
 	memcpy(&find_tcp_tuple.tuple4, &find_tuple4, sizeof(tuple4_key_t));
-	memcpy(&find_tcp_conn.tuple4, &find_tuple4, sizeof(tuple4_key_t));
 
 	/* TCP Tuple Stat */
 	HashFind(stat, unique_tcp_tuples, &find_tcp_tuple.tuple4, tuple4_key_t, unique_tcp_tuple);
@@ -130,6 +110,12 @@ void tcp_stat(struct statistic* stat, unsigned char* data, unsigned data_len)
 
 		struct unique_tcp_tuple* self = (struct unique_tcp_tuple*)malloc(sizeof(struct unique_tcp_tuple));
 		struct unique_tcp_tuple* pair = (struct unique_tcp_tuple*)malloc(sizeof(struct unique_tcp_tuple));
+		memset(self, 0, sizeof(struct unique_tcp_tuple));
+		memset(pair, 0, sizeof(struct unique_tcp_tuple));
+		if (tcp_hdr->syn) {
+			self->has_syn = 1;
+			pair->has_syn = 1;
+		}
 		self->pair = pair;
 		pair->pair = self;
 		memcpy(&self->tuple4, &find_tcp_tuple.tuple4, sizeof(tuple4_key_t));
@@ -139,41 +125,36 @@ void tcp_stat(struct statistic* stat, unsigned char* data, unsigned data_len)
 
 		find_tcp_tuple.tuple4.saddr = ip_hdr->daddr;
 		find_tcp_tuple.tuple4.daddr = ip_hdr->saddr;
-		find_tcp_tuple.tuple4.sport = dport;
-		find_tcp_tuple.tuple4.dport = sport;
+		find_tcp_tuple.tuple4.sport = tcp_hdr->dest;
+		find_tcp_tuple.tuple4.dport = tcp_hdr->source;
 		memcpy(&pair->tuple4, &find_tcp_tuple.tuple4, sizeof(tuple4_key_t));
 		HashAdd(stat, pair, unique_tcp_tuples, tuple4, tuple4_key_t);	
 	}
 	else {
+		if (tcp_hdr->fin) {
+			found_unique_tcp_tuple->has_fin = 1;
+			found_unique_tcp_tuple->pair->has_fin = 1;
+		}
 		found_unique_tcp_tuple->pkt_num ++;
 		found_unique_tcp_tuple->amount += data_len;
 	}
+}
 
-	/* TCP Conn Stat */
-	HashFind(stat, tcp_conns, &find_tcp_conn.tuple4, tuple4_key_t, tcp_conn);
-	if (found_tcp_conn == NULL) {
-		stat->tcp_conn_num++;
+void tcp_summary(struct statistic* stat)
+{
+	struct unique_tcp_tuple* cursor;
 
-		struct tcp_conn* self = (struct tcp_conn*)malloc(sizeof(struct tcp_conn));
-		struct tcp_conn* pair = (struct tcp_conn*)malloc(sizeof(struct tcp_conn));
-		self->pair = pair;
-		pair->pair = self;
-		memcpy(&self->tuple4, &find_tcp_conn.tuple4, sizeof(tuple4_key_t));
-		self->pkt_num ++;
-		self->amount += data_len;
-		HashAdd(stat, self, tcp_conns, tuple4, tuple4_key_t);	
-
-		find_tcp_conn.tuple4.saddr = ip_hdr->daddr;
-		find_tcp_conn.tuple4.daddr = ip_hdr->saddr;
-		find_tcp_conn.tuple4.sport = dport;
-		find_tcp_conn.tuple4.dport = sport;
-		memcpy(&pair->tuple4, &find_tcp_conn.tuple4, sizeof(tuple4_key_t));
-		HashAdd(stat, pair, tcp_conns, tuple4, tuple4_key_t);	
-	}
-	else {
-		found_tcp_conn->pkt_num ++;
-		found_tcp_conn->amount += data_len;
-	}
+    for(cursor = stat->unique_tcp_tuples; cursor != NULL; cursor = cursor->hh.next) {
+    	if (cursor->traversed) continue;
+    	cursor->traversed = 1;
+    	cursor->pair->traversed = 1;
+    	if (cursor->has_syn) {
+    		stat->tcp_conn_num++;
+    		if (cursor->has_fin) {
+    			stat->tcp_complete_conn_num++;
+    		}
+    	}
+    }
 }
 
 void udp_stat(struct statistic* stat, unsigned char* data, unsigned data_len)
@@ -183,6 +164,8 @@ void udp_stat(struct statistic* stat, unsigned char* data, unsigned data_len)
 
 void summary(struct statistic* stat)
 {
+	tcp_summary(stat);
+
 	printf("Base Stat:\n");
 	printf("Packets: %llu (%llu bytes)\n", stat->pkt_num, stat->pkt_amount);
 	printf("==============\n");
@@ -193,6 +176,7 @@ void summary(struct statistic* stat)
 	printf("==============\n");
 	printf("TCP Stat:\n");
 	printf("TCP Packets: %llu (%llu bytes)\n", stat->tcp_pkt_num, stat->tcp_pkt_amount);
-	printf("TCP Tuples: %llu\n", stat->unique_tcp_tuple_num);
-	printf("TCP Connections: %llu\n", stat->tcp_conn_num);
+	printf("TCP Connections (unique tuples): %llu\n", stat->unique_tcp_tuple_num);
+	printf("TCP Connections (with SYN): %llu\n", stat->tcp_conn_num);
+	printf("TCP Connections (with SYN and FIN): %llu\n", stat->tcp_complete_conn_num);
 }

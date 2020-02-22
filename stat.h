@@ -21,19 +21,15 @@ typedef struct {
 	unsigned short dport;
 } tuple4_key_t;
 
-struct tcp_conn {
-    tuple4_key_t tuple4;
-    unsigned long long pkt_num;
-    unsigned long long amount;
-    struct tcp_conn* pair;
-    UT_hash_handle hh;
-};
 
 struct unique_tcp_tuple {
     tuple4_key_t tuple4;
     unsigned long long pkt_num;
     unsigned long long amount;
     struct unique_tcp_tuple* pair;
+    int has_syn;
+    int has_fin;
+    int traversed;
     UT_hash_handle hh;
 };
 
@@ -64,7 +60,7 @@ struct statistic {
 	struct unique_tcp_tuple* unique_tcp_tuples;
 	/* must handshake using SYN packet */
 	unsigned long long tcp_conn_num;
-	struct tcp_conn* tcp_conns;
+	unsigned long long tcp_complete_conn_num;
 
 	unsigned long long udp_pkt_amount;
 	unsigned long long udp_pkt_num;
