@@ -1,6 +1,7 @@
 #include "stat.h"
 #include "util.h"
 
+#include "stdio.h"
 #include <linux/ip.h>
 #include <linux/tcp.h>
 #include <netinet/in.h>
@@ -167,7 +168,8 @@ void summary(struct statistic* stat)
 	tcp_summary(stat);
 
 	printf("Base Stat:\n");
-	printf("Packets: %llu (%llu bytes)\n", stat->pkt_num, stat->pkt_amount);
+	printf("Packets: %llu (%llu bytes in total, %lf bytes in avg.)\n", 
+			stat->pkt_num, stat->pkt_amount, (double)stat->pkt_amount/stat->pkt_num);
 	printf("==============\n");
 	printf("IP Stat:\n");
 	printf("IP Packets: %llu (%llu bytes)\n", stat->ip_pkt_num, stat->ip_pkt_amount);
