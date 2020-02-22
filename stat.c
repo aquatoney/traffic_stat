@@ -167,8 +167,9 @@ void summary(struct statistic* stat)
 {
 	tcp_summary(stat);
 
+	printf("\n");
 	printf("Base Stat:\n");
-	printf("Packets: %llu (%llu bytes in total, %lf bytes in avg.)\n", 
+	printf("Packets: %llu\n%llu bytes in total, %.2lf bytes in avg.\n", 
 			stat->pkt_num, stat->pkt_amount, (double)stat->pkt_amount/stat->pkt_num);
 	printf("==============\n");
 	printf("IP Stat:\n");
@@ -181,4 +182,5 @@ void summary(struct statistic* stat)
 	printf("TCP Connections (unique tuples): %llu\n", stat->unique_tcp_tuple_num);
 	printf("TCP Connections (with SYN): %llu\n", stat->tcp_conn_num);
 	printf("TCP Connections (with SYN and FIN): %llu\n", stat->tcp_complete_conn_num);
+	printf("\n");
 }
